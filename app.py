@@ -28,9 +28,11 @@ with st.sidebar:
     st.header("3. Fluxo de Caixa")
     retirada_mensal = st.number_input("Retirada Mensal (R$)", value=5000.0, help="Use valores negativos para aportes")
     
+    # NOVAS OPÇÕES DE CONTROLE
     st.divider()
-    # CHECKBOX NOVO AQUI
-    exibir_sem_retiradas = st.checkbox("Mostrar cenário 'Sem Retiradas'", value=True)
+    st.subheader("Opções de Visualização e Cálculo")
+    ajustar_pelo_ipca = st.checkbox("Ajustar retiradas pela inflação?", value=True, help="Se marcado, o valor do saque aumenta mensalmente conforme o IPCA.")
+    exibir_sem_retiradas = st.checkbox("Mostrar linha 'Sem Retiradas'", value=True)
 
 # --- LÓGICA DE CÁLCULO ---
 meses_totais = (data_fim.year - data_inicio.year) * 12 + (data_fim.month - data_inicio.month)
@@ -58,13 +60,21 @@ for i in range(1, meses_totais + 1):
     val_atual_sr = val_atual_sr * (1 + taxa_retorno_liq_mensal)
     saldo_sem_retirada.append(val_atual_sr)
     
-    # 2. Com Retiradas
-    retirada_atual = retirada_mensal * ((1 + taxa_inflacao_mensal)**i)
+    # 2. Com Retiradas (COM A NOVA LÓGICA)
+    if ajustar_pelo_ipca:
+        # Aumenta o saque conforme a inflação acumulada até o mês 'i'
+        retirada_atual = retirada_mensal * ((1 + taxa_inflacao_mensal)**i)
+    else:
+        # Mantém o valor nominal fixo
+        retirada_atual = retirada_mensal
+    
     val_atual_cr = val_atual_cr * (1 + taxa_retorno_liq_mensal) - retirada_atual
+    
+    # Trava em zero para não ficar negativo no gráfico
     if val_atual_cr < 0: val_atual_cr = 0
     saldo_com_retirada.append(val_atual_cr)
     
-    # 3. Bandas (Volatilidade aumenta com raiz do tempo)
+    # 3. Bandas (Volatilidade)
     desvio = val_atual_cr * (variancia_anual * np.sqrt(i/12))
     banda_superior.append(val_atual_cr + desvio)
     banda_inferior.append(max(0, val_atual_cr - desvio))
@@ -84,7 +94,7 @@ fig = go.Figure()
 fig.add_trace(go.Scatter(x=df['Data'], y=df['Superior'], mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'))
 fig.add_trace(go.Scatter(x=df['Data'], y=df['Inferior'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(0, 128, 0, 0.2)', name='Intervalo de Variância'))
 
-# Linha Sem Retiradas (CONDICIONAL - Só aparece se o checkbox estiver marcado)
+# Linha Sem Retiradas (Controlada pelo checkbox)
 if exibir_sem_retiradas:
     fig.add_trace(go.Scatter(
         x=df['Data'], y=df['Sem Retiradas'],
@@ -105,8 +115,7 @@ fig.update_layout(
     template="plotly_white",
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     hovermode="x unified",
-    # AQUI ESTÁ A MUDANÇA DA CASA DECIMAL
-    yaxis=dict(tickformat=".1f") 
+    yaxis=dict(tickformat=".1f") # Uma casa decimal forçada
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -114,10 +123,16 @@ st.plotly_chart(fig, use_container_width=True)
 # --- RESUMO ---
 st.divider()
 col1, col2, col3 = st.columns(3)
+
+# Recálculo do total sacado para o resumo (precisa seguir a mesma lógica do loop)
+if ajustar_pelo_ipca:
+    total_retirado = sum([retirada_mensal * ((1 + taxa_inflacao_mensal)**i) for i in range(1, meses_totais + 1)])
+else:
+    total_retirado = retirada_mensal * meses_totais
+
 with col1:
-    st.metric("Patrimônio Final", f"R$ {saldo_com_retirada[-1]:,.2f}")
+    st.metric("Patrimônio Final Estimado", f"R$ {saldo_com_retirada[-1]:,.2f}")
 with col2:
-    total_retirado = sum([retirada_mensal * ((1 + taxa_inflacao_mensal)**i) for i in range(len(datas))])
-    st.metric("Total Saques", f"R$ {total_retirado:,.2f}")
+    st.metric("Total Sacado no Período", f"R$ {total_retirado:,.2f}")
 with col3:
-    st.metric("Retorno Líq. Mensal", f"{taxa_retorno_liq_mensal*100:.2f}%")
+    st.metric("Taxa Líquida Mensal", f"{taxa_retorno_liq_mensal*100:.2f}%")
